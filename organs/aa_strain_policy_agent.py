@@ -194,6 +194,88 @@ def _sha256_file(path):
     return h.hexdigest()
 
 
+# ── the audit record ─────────────────────────────────────────────────────────
+#
+# The record is the compliance artifact. An artifact that can be edited without
+# trace is a claim, not evidence, so each entry carries the digest of the entry
+# before it: modifying, deleting or forging a line breaks the chain from that
+# point on, and `strainctl audit verify` names the record where it broke.
+#
+# Destruction is still possible — this is a file in the user's own home
+# directory, and no user-space tool can prevent its own deletion. Tampering is
+# what is detectable, and the honest claim is the one made in the threat model.
+
+GENESIS = "0" * 64
+
+
+def _audit_tail_hash(dest):
+    """The last chained hash in the record, or GENESIS if there is none."""
+    prev = GENESIS
+    try:
+        with open(dest) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if "hash" in rec:
+                    prev = rec["hash"]
+    except OSError:
+        pass
+    return prev
+
+
+def chain_append(dest, entry):
+    """Append one entry, chained to the one before it.
+
+    Single implementation, shared by every organ and by strainctl. Two
+    implementations of one rule is one implementation and one bug waiting to be
+    found in production.
+    """
+    entry = dict(entry)
+    entry.pop("hash", None)
+    entry["prev"] = _audit_tail_hash(dest)
+    payload = json.dumps({k: v for k, v in entry.items()},
+                         sort_keys=True, separators=(",", ":"))
+    entry["hash"] = hashlib.sha256((entry["prev"] + payload).encode()).hexdigest()
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+        # O_APPEND so two organs writing at once cannot interleave a record.
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, (json.dumps(entry, sort_keys=True) + "\n").encode())
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+    return entry["hash"]
+
+
+def verify_audit_chain(records):
+    """Return (ok, detail, checked). Entries written before chaining existed
+    carry no `hash` and are reported as legacy, not as tampering — calling an
+    old format an attack is how an audit tool loses its reader."""
+    prev = GENESIS
+    legacy = 0
+    for i, rec in enumerate(records, 1):
+        if "hash" not in rec:
+            legacy += 1
+            continue
+        body = {k: v for k, v in rec.items() if k != "hash"}
+        payload = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        if rec.get("prev") != prev:
+            return False, f"chain break at record {i}", i
+        if rec["hash"] != hashlib.sha256((prev + payload).encode()).hexdigest():
+            return False, f"record {i} was modified", i
+        prev = rec["hash"]
+    if legacy:
+        return True, f"chain intact; {legacy} record(s) predate chaining", len(records)
+    return True, "chain intact", len(records)
+
+
 # ── capability analysis ──────────────────────────────────────────────────────
 
 def observed_capabilities(path):
@@ -536,22 +618,18 @@ class StrainPolicyAgent(BasicAgent):
         fresh = [w for w in withheld if not w.get("already_withheld")]
         if not fresh and not readmitted:
             return
-        try:
-            with open(dest, "a") as fh:
-                for w in fresh:
-                    fh.write(json.dumps({
-                        "at": int(time.time()), "event": "agent.withheld",
-                        "file": w.get("file"), "sha256": w.get("sha256"),
-                        "ring": w.get("ring"), "reason": w.get("reason"),
-                    }) + "\n")
-                for fn in readmitted:
-                    fh.write(json.dumps({
-                        "at": int(time.time()), "event": "agent.readmitted",
-                        "file": fn,
-                        "reason": "now permitted by the current policy",
-                    }) + "\n")
-        except OSError:
-            pass
+        for w in fresh:
+            chain_append(dest, {
+                "at": int(time.time()), "event": "agent.withheld",
+                "file": w.get("file"), "sha256": w.get("sha256"),
+                "ring": w.get("ring"), "reason": w.get("reason"),
+            })
+        for fn in readmitted:
+            chain_append(dest, {
+                "at": int(time.time()), "event": "agent.readmitted",
+                "file": fn,
+                "reason": "now permitted by the current policy",
+            })
 
     # ---- the UX: the model is told the posture, so it can explain it ----
 

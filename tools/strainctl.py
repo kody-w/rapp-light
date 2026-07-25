@@ -114,7 +114,8 @@ def cmd_init(args):
         "enforce": True,
         "forbidden_capabilities": list(args.forbid or []),
         "allowed_hosts": list(args.allow_host or []),
-        "always_permit": ["aa_strain_policy_agent.py", "strain_admin_agent.py"],
+        "always_permit": ["aa_strain_policy_agent.py", "strain_admin_agent.py",
+                          "strain_credential_agent.py"],
         "allowlist": {},
         "admin": {"contact": args.contact or ""},
         "created_at": int(time.time()),
@@ -377,6 +378,244 @@ def cmd_report(args):
     return 0
 
 
+# ── credentials ──────────────────────────────────────────────────────────────
+#
+# The strain grants; it never holds. A grant is a NAME or a glob, recorded
+# against the sha256 of an approved agent. The value lives in the broker, on the
+# device, and is never written here — a policy manifest is a file that gets
+# copied, mailed and committed, and the day it contains a secret is the day the
+# control becomes the leak.
+
+def _resolve_agent(man, target):
+    """Map a filename or sha prefix to its allowlist key."""
+    al = man.get("allowlist") or {}
+    hits = [k for k, v in al.items()
+            if k.startswith(target) or v.get("file") == target]
+    if not hits:
+        sys.exit(
+            f"strainctl: {target!r} is not an approved agent.\n"
+            f"  A credential cannot be granted to an agent the strain does not\n"
+            f"  admit. Approve it first:  strainctl approve <file>")
+    if len(hits) > 1:
+        sys.exit(f"strainctl: {target!r} is ambiguous ({len(hits)} matches)")
+    return hits[0]
+
+
+def cmd_cred_grant(args):
+    path = manifest_path(args)
+    man = load(path)
+    key = _resolve_agent(man, args.agent)
+    require_key("grant a credential")
+    creds = man.setdefault("credentials", {})
+    grants = creds.setdefault("grants", {})
+    entry = grants.setdefault(key, [])
+    if isinstance(entry, dict):
+        entry = entry.setdefault("allow", [])
+    if args.pattern in entry:
+        print(f"  already granted: {args.pattern}")
+        return 0
+    entry.append(args.pattern)
+    grants[key] = entry
+    save(path, man)
+    fn = (man["allowlist"][key]).get("file")
+    print(f"  granted {args.pattern!r} to {fn}  sha={key[:16]}")
+    print("  The value is not stored here — only the grant. Put the value in")
+    print("  the broker, naming a concrete credential rather than the pattern:")
+    example = args.pattern.replace("*", "storage-key").replace("?", "")
+    print(f"    printf '%s' \"$VALUE\" | rapp-keyring set {example} --stdin")
+    return 0
+
+
+def cmd_cred_revoke(args):
+    path = manifest_path(args)
+    man = load(path)
+    key = _resolve_agent(man, args.agent)
+    require_key("revoke a credential")
+    grants = (man.get("credentials") or {}).get("grants") or {}
+    entry = grants.get(key) or []
+    if isinstance(entry, dict):
+        entry = entry.get("allow") or []
+    if args.pattern not in entry:
+        sys.exit(f"strainctl: {args.pattern!r} is not granted to that agent")
+    entry.remove(args.pattern)
+    grants[key] = entry
+    save(path, man)
+    print(f"  revoked {args.pattern!r}; it stops applying on the next message")
+    return 0
+
+
+def cmd_cred_deny(args):
+    """A deny rule outranks every grant, including one an administrator adds
+    later by mistake. This is where `prod/*` belongs."""
+    path = manifest_path(args)
+    man = load(path)
+    require_key("add a credential deny rule")
+    creds = man.setdefault("credentials", {})
+    denies = creds.setdefault("deny", [])
+    if args.remove:
+        if args.pattern not in denies:
+            sys.exit(f"strainctl: {args.pattern!r} is not denied")
+        denies.remove(args.pattern)
+        save(path, man)
+        print(f"  removed the deny rule {args.pattern!r}")
+        return 0
+    if args.pattern not in denies:
+        denies.append(args.pattern)
+    save(path, man)
+    print(f"  denied {args.pattern!r} for every agent, outranking any grant")
+    return 0
+
+
+def cmd_cred_list(args):
+    path = manifest_path(args)
+    man = load(path, required=False) or {}
+    al = man.get("allowlist") or {}
+    creds = man.get("credentials") or {}
+    grants = creds.get("grants") or {}
+    out = {
+        "deny": creds.get("deny") or [],
+        "default": creds.get("default") or [],
+        "grants": {},
+    }
+    for key, entry in grants.items():
+        patterns = entry if isinstance(entry, list) else (entry.get("allow") or [])
+        out["grants"][(al.get(key) or {}).get("file", key[:16])] = patterns
+    if args.json:
+        print(json.dumps(out, indent=2, sort_keys=True))
+        return 0
+    if not out["grants"] and not out["default"]:
+        print("  no agent is granted any credential")
+    for fn, patterns in sorted(out["grants"].items()):
+        print(f"  {fn}")
+        for pattern in patterns:
+            print(f"      {pattern}")
+    if out["default"]:
+        print(f"  (default for every approved agent: {', '.join(out['default'])})")
+    if out["deny"]:
+        print(f"  denied for all: {', '.join(out['deny'])}")
+    print()
+    print("  Names only. Values live in the broker, never in this manifest.")
+    return 0
+
+
+def cmd_cred_check(args):
+    """Answer the question an administrator actually asks: would this agent get
+    this credential, and if not, why not."""
+    path = manifest_path(args)
+    man = load(path, required=False) or {}
+    organ = _credential_organ()
+    man.setdefault("credentials", {}).setdefault("grants", {})
+    allowed, refused = organ.adjudicate(man, args.agent, [args.pattern])
+    if allowed:
+        print(f"  ALLOW  {args.agent} → {args.pattern}")
+        return 0
+    for name, reason in refused:
+        print(f"  DENY   {args.agent} → {name}")
+        print(f"         {reason}")
+    return 1
+
+
+def _credential_organ():
+    import importlib.util
+    for cand in (os.path.join(HERE, "..", "organs", "strain_credential_agent.py"),
+                 os.path.join(HERE, "strain_credential_agent.py")):
+        p = os.path.abspath(cand)
+        if os.path.isfile(p):
+            spec = importlib.util.spec_from_file_location("_strain_cred", p)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    sys.exit("strainctl: strain_credential_agent.py not found next to this tool")
+
+
+# ── the audit record ─────────────────────────────────────────────────────────
+
+def _audit_file(man):
+    return (man.get("audit_log") or
+            os.path.join(os.path.dirname(
+                os.getenv("RAPP_AGENTS_DIR") or
+                os.path.join(os.path.expanduser("~"), ".brainstem", "agents")),
+                "strain-audit.jsonl"))
+
+
+def cmd_audit(args):
+    path = manifest_path(args)
+    man = load(path, required=False) or {}
+    dest = _audit_file(man)
+    if not os.path.isfile(dest):
+        print(f"  no audit record yet at {dest}")
+        return 0
+    records = []
+    with open(dest) as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                try:
+                    records.append(json.loads(line))
+                except ValueError:
+                    pass
+
+    if args.audit_action == "verify":
+        ok, detail, checked = ORGAN.verify_audit_chain(records) \
+            if hasattr(ORGAN, "verify_audit_chain") else _verify_chain(records)
+        print(f"  {'OK' if ok else 'TAMPERED'} — {detail} ({checked} record(s))")
+        return 0 if ok else 2
+
+    if args.audit_action == "export":
+        # SIEM-shaped. Names, decisions and reasons only; the record has never
+        # contained a credential value or a line of agent source.
+        for rec in records:
+            if args.format == "cef":
+                print(_to_cef(rec))
+            else:
+                print(json.dumps(rec, sort_keys=True))
+        return 0
+
+    for rec in records[-args.count:]:
+        print(f"  {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(rec.get('at', 0)))}"
+              f"  {rec.get('event', '?'):24} {rec.get('file') or rec.get('agent') or ''}"
+              f"  {rec.get('reason', '')[:70]}")
+    return 0
+
+
+def _verify_chain(records):
+    """Records written before chaining was introduced carry no `prev`, and are
+    reported as unchained rather than as tampering — calling an old format an
+    attack is how an audit tool loses its reader."""
+    prev = "0" * 64
+    unchained = 0
+    for i, rec in enumerate(records, 1):
+        if "hash" not in rec:
+            unchained += 1
+            continue
+        body = {k: v for k, v in rec.items() if k != "hash"}
+        payload = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        expect = hashlib.sha256((prev + payload).encode()).hexdigest()
+        if rec.get("prev") != prev:
+            return False, f"chain break at record {i}", i
+        if rec["hash"] != expect:
+            return False, f"record {i} was modified", i
+        prev = rec["hash"]
+    if unchained:
+        return True, f"chain intact; {unchained} legacy record(s) predate chaining", \
+            len(records)
+    return True, "chain intact", len(records)
+
+
+def _to_cef(rec):
+    """ArcSight CEF, because that is what most SIEMs still ingest without a
+    custom parser."""
+    sev = {"agent.withheld": 6, "credential.refused": 7,
+           "credential.used": 4, "agent.readmitted": 3}.get(rec.get("event"), 5)
+    ext = " ".join(
+        f"{k}={str(v).replace('=', '\\=')}"
+        for k, v in sorted(rec.items())
+        if k not in ("event", "hash", "prev") and v not in (None, "", [])
+    )
+    return (f"CEF:0|RAPP|rapp-light|1.0|{rec.get('event','?')}|"
+            f"{rec.get('event','?')}|{sev}|{ext}")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="strainctl",
                                 description="Administer a RAPP strain.")
@@ -423,6 +662,39 @@ def main(argv=None):
     q.add_argument("--contact")
     q.add_argument("--show", action="store_true")
     q.set_defaults(fn=cmd_admin)
+
+    q = sub.add_parser("cred", help="govern which agent may use which credential")
+    csub = q.add_subparsers(dest="cred_action", required=True)
+    r = csub.add_parser("grant", help="let an approved agent use a credential")
+    r.add_argument("agent", help="approved filename or sha256 prefix")
+    r.add_argument("pattern", help="credential name or glob, e.g. azure/*")
+    r.set_defaults(fn=cmd_cred_grant)
+    r = csub.add_parser("revoke", help="withdraw a grant")
+    r.add_argument("agent")
+    r.add_argument("pattern")
+    r.set_defaults(fn=cmd_cred_revoke)
+    r = csub.add_parser("deny", help="deny a pattern for every agent (outranks grants)")
+    r.add_argument("pattern")
+    r.add_argument("--remove", action="store_true")
+    r.set_defaults(fn=cmd_cred_deny)
+    r = csub.add_parser("list", help="who may use what — names only")
+    r.add_argument("--json", action="store_true")
+    r.set_defaults(fn=cmd_cred_list)
+    r = csub.add_parser("check", help="would this agent get this credential, and why")
+    r.add_argument("agent")
+    r.add_argument("pattern")
+    r.set_defaults(fn=cmd_cred_check)
+
+    q = sub.add_parser("audit", help="read, verify and export the audit record")
+    asub = q.add_subparsers(dest="audit_action", required=True)
+    r = asub.add_parser("tail", help="recent decisions")
+    r.add_argument("-n", "--count", type=int, default=20)
+    r.set_defaults(fn=cmd_audit)
+    r = asub.add_parser("verify", help="is the record intact?")
+    r.set_defaults(fn=cmd_audit, count=0)
+    r = asub.add_parser("export", help="emit for a SIEM")
+    r.add_argument("--format", choices=["jsonl", "cef"], default="jsonl")
+    r.set_defaults(fn=cmd_audit, count=0)
 
     for name, fn, helptext in (("seal", cmd_seal, "re-seal after editing"),
                                ("verify", cmd_verify, "is the manifest intact?"),

@@ -58,3 +58,16 @@ jobs:
                   bad = 1
           sys.exit(bad)
           PY
+
+      - name: Conformance gate
+        run: python3 conformance.py
+
+      - name: Conformance report
+        if: always()
+        run: python3 conformance.py --json > conformance.json || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-${{ matrix.os || 'ubuntu' }}
+          path: conformance.json

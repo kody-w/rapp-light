@@ -46,7 +46,7 @@ reaches everyone else, because it is the same grail.
 
 ---
 
-## The five checks
+## The six checks
 
 | # | Check | What it stops |
 |---|---|---|
@@ -55,6 +55,7 @@ reaches everyone else, because it is the same grail.
 | 3 | **Identity** | an approved agent that was edited afterwards |
 | 4 | **Capability** | code that reaches further than it declares |
 | 5 | **Egress** | outbound connections to unapproved hosts |
+| 6 | **Credential** | an agent using a secret the estate never granted it |
 
 ### Check 4 is the one that is different
 
@@ -102,6 +103,56 @@ strainctl approve agents/log_detective_agent.py \
 ```
 
 Every exception appears in `strainctl report`, with who approved it and when.
+
+---
+
+## Credentials — two keys, two owners
+
+The strain governs what an agent may *do*. Credentials are what it may *hold*,
+and that is a different question with a different owner.
+
+It matters more for agents than for ordinary programs. The moment an agent
+**reads** a secret, that value is in the model's context — transmitted to a
+provider, written to a transcript, and possibly reproduced later into a file or
+a pull request. No amount of scoping or rotation prevents it, because the leak
+happens at the one operation every traditional secret manager treats as safe.
+
+So a credential is used only when two independent parties agree:
+
+```
+   the machine  ──  RAPP Keyring  ──▸  which PROCESS may hold this secret
+                                       owned by the user, on the device
+
+   the estate   ──  the strain    ──▸  which AGENT may cause it to be used
+                                       owned by the administrator, in sealed policy
+```
+
+Keyring cannot see inside the brainstem — every agent there is one caller. The
+strain can, because it identifies agents by the sha256 of their bytes. And the
+strain must never hold a value, because a policy manifest is a file that gets
+copied and committed. **The strain holds grants; Keyring holds values.**
+
+The credential organ has **no action that returns a secret** — not a restricted
+one, not a flag-gated one. It runs your command with the value injected and
+masked in the output:
+
+```console
+$ # the command deliberately echoes the secret; this is what the agent receives
+{
+  "credentials_injected": ["azure/storage-key"],
+  "stdout": "deploying with «redacted:azure/storage-key»\n"
+}
+```
+
+```bash
+strainctl approve agents/deploy_agent.py --by secops@contoso.example
+strainctl cred grant deploy_agent.py 'azure/*'
+strainctl cred deny 'prod/*'              # outranks every grant, everywhere
+strainctl cred check deploy_agent.py prod/db
+```
+
+An agent edited after approval loses its grants — the identity check doing
+double duty. Full model: **[`docs/CREDENTIALS.md`](docs/CREDENTIALS.md)**.
 
 ---
 
@@ -163,11 +214,18 @@ to reassure:
   rather than left to guess.
 - **[`docs/RINGS.md`](docs/RINGS.md)** — the maturity model and what each ring
   commits to.
+- **[`docs/CREDENTIALS.md`](docs/CREDENTIALS.md)** — the two-key credential
+  model, and why an agent may use a secret but never see one.
+- **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** — getting policy onto a fleet,
+  why the seal key must never land on the endpoint, and the SIEM record.
+- **[`SECURITY.md`](SECURITY.md)** — what is in scope, what is a documented
+  non-goal, and how to report the difference.
 
 Every mitigation claimed in the threat model has a test named for it:
 
 ```bash
-python3 -m unittest discover -s tests -v     # 27 tests, no network, no deps
+python3 conformance.py                       # 14 checks, proved against the code
+python3 -m unittest discover -s tests -v     # 49 tests, no network, no deps
 ```
 
 ---
