@@ -63,7 +63,7 @@ li{margin-bottom:6px}
   <div class="badges">
     <span class="badge">rapp-strain/1.0</span>
     <span class="badge ok">0 lines added to the kernel</span>
-    <span class="badge ok">27 tests · no deps</span>
+    <span class="badge ok">49 tests · no deps</span>
     <span class="badge">MIT</span>
   </div>
   <h1>RAPP Light</h1>
@@ -99,7 +99,7 @@ li{margin-bottom:6px}
 │  strain.json     ← sealed policy, admin-owned  │
 └────────────────────────────────────────────────┘</div>
 
-<h2>Five checks</h2>
+<h2>Six checks</h2>
 <table>
 <tr><th>Check</th><th>What it stops</th></tr>
 <tr><td><strong>Seal</strong></td><td>Policy edited to widen what is admitted — fails <em>closed</em>, to admitting nothing</td></tr>
@@ -107,6 +107,7 @@ li{margin-bottom:6px}
 <tr><td><strong>Identity</strong></td><td>An approved agent that was edited afterwards</td></tr>
 <tr><td><strong>Capability</strong></td><td>Code that reaches further than it declares</td></tr>
 <tr><td><strong>Egress</strong></td><td>Outbound connections to unapproved hosts</td></tr>
+<tr><td><strong>Credential</strong></td><td>An agent using a secret the estate never granted it</td></tr>
 </table>
 
 <h3>The capability check is the one that is different</h3>
@@ -120,6 +121,42 @@ li{margin-bottom:6px}
   Approving this would put an undeclared capability into your estate
   under an approval that does not mention it.</code></pre>
 <p>An agent cannot quietly gain reach between review and execution without changing its bytes — and changing its bytes fails the identity check.</p>
+
+<h2>Credentials — two keys, two owners</h2>
+<p>The strain governs what an agent may <em>do</em>. Credentials are what it may
+<em>hold</em>, and that is a different question with a different owner.</p>
+<p>It matters more for agents than for ordinary programs. The moment an agent
+<strong>reads</strong> a secret, that value is in the model's context —
+transmitted to a provider, written to a transcript, possibly reproduced later
+into a file or a pull request. No amount of scoping or rotation prevents it,
+because the leak happens at the one operation every traditional secret manager
+treats as safe.</p>
+<div class="diagram">   the machine  ──  RAPP Keyring  ──▸  which PROCESS may hold this secret
+                                       owned by the user, on the device
+
+   the estate   ──  the strain    ──▸  which AGENT may cause it to be used
+                                       owned by the administrator, in sealed policy</div>
+<p>Keyring cannot see inside the brainstem — every agent there is one caller. The
+strain can, because it identifies agents by the sha256 of their bytes. And the
+strain must never hold a value, because a policy manifest is a file that gets
+copied and committed. <strong>The strain holds grants; Keyring holds
+values.</strong></p>
+<p>The credential organ has <strong>no action that returns a secret</strong> — not
+a restricted one, not a flag-gated one. It runs your command with the value
+injected, and masked in the output. This is what the agent receives from a
+command that deliberately echoes the secret:</p>
+<pre><code>{
+  "credentials_injected": ["azure/storage-key"],
+  "stdout": "deploying with «redacted:azure/storage-key»\n"
+}</code></pre>
+<pre><code>$ strainctl cred grant deploy_agent.py 'azure/*'
+$ strainctl cred deny  'prod/*'          <span class="dim"># outranks every grant, everywhere</span>
+$ strainctl cred check deploy_agent.py prod/db
+  DENY   deploy_agent.py → prod/db
+         denied by the strain rule 'prod/*'</code></pre>
+<p>An agent edited after approval loses its grants — the identity check doing
+double duty. Full model in
+<a href="https://github.com/kody-w/rapp-light/blob/main/docs/CREDENTIALS.md">docs/CREDENTIALS.md</a>.</p>
 
 <h2>The band that expands</h2>
 <p>Enterprise adoption is not binary, so the control is not either. Every capability declares a maturity ring; the organisation declares the band it admits.</p>
@@ -160,7 +197,7 @@ RAPP   ▸ 3 capabilities are withheld by policy. log-detective is at
 </div>
 <p>Every mitigation claimed in the threat model has a test named for the threat it covers:</p>
 <pre><code>python3 -m unittest discover -s tests -v
-# 27 tests · no network · no dependencies · no package index needed</code></pre>
+# 49 tests · no network · no dependencies · no package index needed</code></pre>
 <ul>
   <li><a href="https://github.com/kody-w/rapp-light/blob/main/docs/THREAT-MODEL.md">Threat model</a> — assets, trust boundaries, ten threats with dispositions, and an explicit out-of-scope list</li>
   <li><a href="https://github.com/kody-w/rapp-light/blob/main/docs/COMPLIANCE.md">Compliance</a> — data flows, what leaves the machine, retention, audit record</li>

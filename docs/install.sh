@@ -57,6 +57,21 @@ fetch() {
     fi
 }
 
+# A truncated or corrupted download must not become a working-looking install.
+# This verifies INTEGRITY, not authenticity: it proves the file arrived whole,
+# not that it came from us. For an authenticated install, use the offline bundle
+# from a signed release — see docs/DEPLOYMENT.md.
+verify_py() {
+    # $1 = file, $2 = a marker that must be present
+    python3 - "$1" "$2" <<'PYEOF' || die "$1 arrived incomplete or corrupt — refusing to install"
+import ast, sys
+path, marker = sys.argv[1], sys.argv[2]
+src = open(path, encoding="utf-8", errors="replace").read()
+ast.parse(src)
+assert marker in src, f"{path} is missing {marker!r}"
+PYEOF
+}
+
 if [ -d "$RAPP_HOME/organs" ] && [ -f "$RAPP_HOME/tools/strainctl.py" ]; then
     say "existing installation found — updating the strain in place"
 fi
@@ -76,8 +91,13 @@ else
     say "fetching the strain from $REPO"
     fetch organs/aa_strain_policy_agent.py "$RAPP_HOME/organs/aa_strain_policy_agent.py"
     fetch organs/strain_admin_agent.py     "$RAPP_HOME/organs/strain_admin_agent.py"
+    fetch organs/strain_credential_agent.py "$RAPP_HOME/organs/strain_credential_agent.py"
     fetch tools/strainctl.py               "$RAPP_HOME/tools/strainctl.py"
-    for d in THREAT-MODEL COMPLIANCE RAI RINGS; do
+    verify_py "$RAPP_HOME/organs/aa_strain_policy_agent.py"  "CAPABILITY_EVIDENCE"
+    verify_py "$RAPP_HOME/organs/strain_admin_agent.py"      "RAPP_STRAIN_ADMIN_KEY"
+    verify_py "$RAPP_HOME/organs/strain_credential_agent.py" "def adjudicate"
+    verify_py "$RAPP_HOME/tools/strainctl.py"                "def cmd_approve"
+    for d in THREAT-MODEL COMPLIANCE RAI RINGS CREDENTIALS DEPLOYMENT; do
         fetch "docs/$d.md" "$RAPP_HOME/docs/$d.md" || true
     done
 fi
@@ -85,6 +105,8 @@ fi
 # The organs belong in agents/ — that is the load path the brainstem reads.
 cp "$RAPP_HOME/organs/aa_strain_policy_agent.py" "$RAPP_HOME/agents/"
 cp "$RAPP_HOME/organs/strain_admin_agent.py"     "$RAPP_HOME/agents/"
+[ -f "$RAPP_HOME/organs/strain_credential_agent.py" ] && \
+    cp "$RAPP_HOME/organs/strain_credential_agent.py" "$RAPP_HOME/agents/"
 
 chmod 0700 "$RAPP_HOME" 2>/dev/null || true
 
