@@ -1,0 +1,60 @@
+name: strain
+on:
+  push: {branches: [main]}
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      # No install step and no dependencies, on purpose: a compliance control a
+      # reviewer cannot run without a package index is a compliance control a
+      # reviewer will not run.
+      - name: tests (warnings are errors)
+        run: python3 -W error::ResourceWarning -m unittest discover -s tests -v
+
+  no-kernel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: a strain must never carry a brainstem
+        run: |
+          if find . -name brainstem.py -o -name function_app.py | grep -q .; then
+            echo "::error::a kernel appeared in this repo — the security"
+            echo "::error::argument in docs/THREAT-MODEL.md section 1 is that"
+            echo "::error::a strain is policy, not a fork. Remove it."
+            exit 1
+          fi
+          echo "no kernel present — the strain is policy, as documented"
+
+  self-declaration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: the organs must pass their own capability check
+        run: |
+          python3 - <<'PY'
+          import importlib.util, sys, glob, os
+          spec = importlib.util.spec_from_file_location(
+              "p", "organs/aa_strain_policy_agent.py")
+          m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          bad = 0
+          for f in sorted(glob.glob("organs/*_agent.py")):
+              obs, ev = m.observed_capabilities(f)
+              dec = set((m.declared_capabilities(f) or {}).get("capabilities") or [])
+              extra = obs - dec
+              print(f"{os.path.basename(f)}: declared={sorted(dec)} observed={sorted(obs)}")
+              if extra:
+                  print(f"  ::error::undeclared reach: {sorted(extra)}")
+                  bad = 1
+          sys.exit(bad)
+          PY
