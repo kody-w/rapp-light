@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RAPP Light — a strain of the RAPP brainstem</title>
+<meta name="description" content="A locked-down, auditable RAPP deployment for enterprise networks. Not a fork — the kernel is byte-identical; only the policy around it changes.">
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --line:#30363d; --ink:#e6edf3; --dim:#8b949e;
+  --accent:#58a6ff; --good:#3fb950; --warn:#d29922; --bad:#f85149; --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: light){
+  :root{--bg:#ffffff;--panel:#f6f8fa;--line:#d0d7de;--ink:#1f2328;--dim:#59636e;--accent:#0969da;--good:#1a7f37;--warn:#9a6700;--bad:#cf222e}
+}
+:root[data-theme="dark"]{--bg:#0d1117;--panel:#161b22;--line:#30363d;--ink:#e6edf3;--dim:#8b949e;--accent:#58a6ff;--good:#3fb950;--warn:#d29922;--bad:#f85149}
+:root[data-theme="light"]{--bg:#ffffff;--panel:#f6f8fa;--line:#d0d7de;--ink:#1f2328;--dim:#59636e;--accent:#0969da;--good:#1a7f37;--warn:#9a6700;--bad:#cf222e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:860px;margin:0 auto;padding:0 20px}
+header{border-bottom:1px solid var(--line);padding:64px 0 48px;margin-bottom:48px}
+h1{font-size:clamp(30px,6vw,46px);line-height:1.1;margin:0 0 8px;letter-spacing:-.02em}
+.sub{font-size:clamp(17px,2.6vw,21px);color:var(--dim);margin:0 0 28px;max-width:36em}
+.badges{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:28px}
+.badge{font:600 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:6px 10px;border-radius:999px;border:1px solid var(--line);color:var(--dim);background:var(--panel)}
+.badge.ok{color:var(--good);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
+.cta{display:flex;gap:12px;flex-wrap:wrap}
+a.btn{display:inline-block;padding:11px 18px;border-radius:7px;text-decoration:none;font-weight:600;font-size:15px;border:1px solid var(--line);color:var(--ink);background:var(--panel);transition:border-color .15s}
+a.btn:hover{border-color:var(--accent)}
+a.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+a.btn.primary:hover{filter:brightness(1.1)}
+h2{font-size:26px;margin:56px 0 14px;letter-spacing:-.01em}
+h3{font-size:18px;margin:32px 0 8px}
+p{margin:0 0 16px}
+a{color:var(--accent)}
+.lead{font-size:18px;color:var(--dim)}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;overflow-x:auto;font:13px/1.6 var(--mono);margin:0 0 20px}
+code{font:.9em var(--mono);background:var(--panel);padding:2px 5px;border-radius:4px;border:1px solid var(--line)}
+pre code{background:none;border:0;padding:0;font-size:13px}
+table{width:100%;border-collapse:collapse;margin:0 0 24px;font-size:15px;display:block;overflow-x:auto}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);font-weight:600}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px;margin:0 0 20px}
+.card.warn{border-left:3px solid var(--warn)}
+.card.bad{border-left:3px solid var(--bad)}
+.card.good{border-left:3px solid var(--good)}
+.card h3{margin-top:0}
+.rings{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font:12px/1 var(--mono);margin:18px 0 8px}
+.ring{padding:8px 12px;border-radius:6px;border:1px solid var(--line);background:var(--bg)}
+.ring.now{border-color:var(--good);color:var(--good);font-weight:700}
+.arrow{color:var(--dim)}
+.diagram{font:12px/1.5 var(--mono);white-space:pre;overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px;margin:0 0 20px;color:var(--dim)}
+footer{border-top:1px solid var(--line);margin-top:72px;padding:28px 0 56px;color:var(--dim);font-size:14px}
+.muted{color:var(--dim)}
+ul{padding-left:22px;margin:0 0 16px}
+li{margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="badges">
+    <span class="badge">rapp-strain/1.0</span>
+    <span class="badge ok">0 lines added to the kernel</span>
+    <span class="badge ok">27 tests · no deps</span>
+    <span class="badge">MIT</span>
+  </div>
+  <h1>RAPP Light</h1>
+  <p class="sub">A locked-down, auditable RAPP deployment for enterprise networks — for users who have no elevated permissions, administered the way data loss prevention already is.</p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/kody-w/rapp-light">Repository</a>
+    <a class="btn" href="https://github.com/kody-w/rapp-light/blob/main/docs/THREAT-MODEL.md">Threat model</a>
+    <a class="btn" href="https://github.com/kody-w/rapp-light/blob/main/docs/RAI.md">RAI posture</a>
+    <a class="btn" href="https://github.com/kody-w/rapp-light/blob/main/docs/COMPLIANCE.md">Compliance</a>
+  </div>
+</header>
+
+<h2>The problem with hardened forks</h2>
+<p class="lead">An assistant that loads capabilities is, to a security team, a program that runs code which arrived from somewhere. The usual answer is to ship a hardened edition with the dangerous parts removed.</p>
+<p>Every hardened fork dies the same way. It drifts. It stops receiving upstream security fixes. Eighteen months later the locked-down build is the <em>least</em> secure thing in the estate.</p>
+
+<div class="card good">
+  <h3>A strain constrains the kernel from outside it</h3>
+  <p style="margin-bottom:0">The brainstem in a locked-down deployment is <strong>byte-identical</strong> to the one everyone else runs. What changes is the sealed policy around it — so a security fix reaches the restricted deployment the same day it reaches everyone else.</p>
+</div>
+
+<div class="diagram">┌────────────────────────────────────────────────┐
+│  the same brainstem everyone else runs         │  ← unmodified
+│  (a loader + an LLM loop + a response splitter)│
+└──────────────────┬─────────────────────────────┘
+                   │  loads agents/*_agent.py every turn
+┌──────────────────▼─────────────────────────────┐
+│  aa_strain_policy_agent.py     ← the organ     │
+│  seal → ring → identity → capability → egress  │
+└──────────────────┬─────────────────────────────┘
+                   │  reads
+┌──────────────────▼─────────────────────────────┐
+│  strain.json     ← sealed policy, admin-owned  │
+└────────────────────────────────────────────────┘</div>
+
+<h2>Five checks</h2>
+<table>
+<tr><th>Check</th><th>What it stops</th></tr>
+<tr><td><strong>Seal</strong></td><td>Policy edited to widen what is admitted — fails <em>closed</em>, to admitting nothing</td></tr>
+<tr><td><strong>Ring</strong></td><td>Capabilities more experimental than the organisation accepts</td></tr>
+<tr><td><strong>Identity</strong></td><td>An approved agent that was edited afterwards</td></tr>
+<tr><td><strong>Capability</strong></td><td>Code that reaches further than it declares</td></tr>
+<tr><td><strong>Egress</strong></td><td>Outbound connections to unapproved hosts</td></tr>
+</table>
+
+<h3>The capability check is the one that is different</h3>
+<p>Most allowlists trust a manifest field. That is an allowlist of <em>promises</em>. RAPP Light reads the agent's syntax tree and compares what the code can actually reach against what it declared:</p>
+<pre><code>$ strainctl approve agents/helper_agent.py
+
+  REFUSED: helper_agent.py reaches capabilities it does not declare:
+    process-exec: subprocess.run
+    network: requests.post
+
+  Approving this would put an undeclared capability into your estate
+  under an approval that does not mention it.</code></pre>
+<p>An agent cannot quietly gain reach between review and execution without changing its bytes — and changing its bytes fails the identity check.</p>
+
+<h2>The band that expands</h2>
+<p>Enterprise adoption is not binary, so the control is not either. Every capability declares a maturity ring; the organisation declares the band it admits.</p>
+<div class="rings">
+  <span class="ring">frontier</span><span class="arrow">▸</span>
+  <span class="ring">private-preview</span><span class="arrow">▸</span>
+  <span class="ring">public-preview</span><span class="arrow">▸</span>
+  <span class="ring now">ga ← you start here</span>
+</div>
+<p>Anything above the standing band needs an individual approval carrying a recorded reason — so one team can pilot one frontier capability without moving the whole population onto the frontier ring.</p>
+<pre><code>strainctl approve ./agents/log_detective_agent.py \
+  --exception "SRE pilot; review 2026-10-01" --by secops@contoso.example</code></pre>
+<p class="muted">Every exception appears in <code>strainctl report</code> with its approver and date, so “why is this running in production” always has an answer.</p>
+
+<h2>Elevation is a credential, not a build</h2>
+<p>A locked-down strain and a full brainstem are the same brainstem. An administrator holding the strain credential gets the full surface in the same session — and still cannot approve an agent whose code reaches further than it declares.</p>
+<pre><code>you    ▸ what's being held back?
+RAPP   ▸ 3 capabilities are withheld by policy. log-detective is at
+         public-preview and your band is ga; two others are not approved.
+         Your administrator can approve them.</code></pre>
+
+<h2>No elevated permissions</h2>
+<table>
+<tr><td>Install location</td><td>the user's home directory</td></tr>
+<tr><td>Administrator rights</td><td><strong>not required</strong></td></tr>
+<tr><td>System service registered</td><td>none</td></tr>
+<tr><td>Ports</td><td>loopback only, unprivileged</td></tr>
+<tr><td>Registry / system files</td><td>untouched</td></tr>
+<tr><td>Uninstall</td><td>delete one directory</td></tr>
+</table>
+<pre><code>curl -sfL https://kody-w.github.io/rapp-light/install.sh | sh</code></pre>
+
+<h2>For your security reviewer</h2>
+<div class="card warn">
+  <h3>What this does <em>not</em> stop</h3>
+  <p>A user with local administrative rights can disable the control — they own the machine. <strong>Every endpoint DLP product has the same boundary</strong>, and the threat model says so in plain language rather than blurring it.</p>
+  <p style="margin-bottom:0">What it does provide is real and worth naming: it eliminates <em>accidental</em> non-compliance, which is the overwhelming majority of real incidents, and makes deliberate non-compliance leave a trace.</p>
+</div>
+<p>Every mitigation claimed in the threat model has a test named for the threat it covers:</p>
+<pre><code>python3 -m unittest discover -s tests -v
+# 27 tests · no network · no dependencies · no package index needed</code></pre>
+<ul>
+  <li><a href="https://github.com/kody-w/rapp-light/blob/main/docs/THREAT-MODEL.md">Threat model</a> — assets, trust boundaries, ten threats with dispositions, and an explicit out-of-scope list</li>
+  <li><a href="https://github.com/kody-w/rapp-light/blob/main/docs/COMPLIANCE.md">Compliance</a> — data flows, what leaves the machine, retention, audit record</li>
+  <li><a href="https://github.com/kody-w/rapp-light/blob/main/docs/RAI.md">RAI posture</a> — what the system decides vs what a human decides, and failure direction</li>
+  <li><a href="https://github.com/kody-w/rapp-light/blob/main/docs/RINGS.md">Rings</a> — what each maturity ring commits to</li>
+</ul>
+
+<h2>Why the kernel stays untouched</h2>
+<p>This is not a convention someone remembered to follow. RAPP's constitution confines the brainstem to “a loader + an LLM loop + a response splitter” (Article I) and rejects any change that loads responsibility into the kernel which an agent could serve (Article XXVI).</p>
+<p>RAPP Light adds <strong>zero lines</strong> to the brainstem, and continuous integration fails the build if a kernel ever appears in this repository.</p>
+
+<footer>
+  <p>RAPP Light is a project of Wildhaven Homes LLC · MIT licensed · <a href="https://kody-w.github.io/rapp-train/TRADEMARKS.md">Trademarks</a></p>
+  <p class="muted" style="margin:0">A strain is a pattern, not a product: take the kernel unmodified, add a sealed policy and an organ that enforces it, never fork.</p>
+</footer>
+
+</div>
+</body>
+</html>
