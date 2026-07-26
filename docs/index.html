@@ -63,7 +63,7 @@ li{margin-bottom:6px}
   <div class="badges">
     <span class="badge">rapp-strain/1.0</span>
     <span class="badge ok">0 lines added to the kernel</span>
-    <span class="badge ok">49 tests · no deps</span>
+    <span class="badge ok">58 tests · no deps</span>
     <span class="badge">MIT</span>
   </div>
   <h1>RAPP Light</h1>
@@ -92,14 +92,15 @@ li{margin-bottom:6px}
                    │  loads agents/*_agent.py every turn
 ┌──────────────────▼─────────────────────────────┐
 │  aa_strain_policy_agent.py     ← the organ     │
-│  seal → ring → identity → capability → egress  │
+│  seal → ring → identity → capability →         │
+│  egress → credential → imports                 │
 └──────────────────┬─────────────────────────────┘
                    │  reads
 ┌──────────────────▼─────────────────────────────┐
 │  strain.json     ← sealed policy, admin-owned  │
 └────────────────────────────────────────────────┘</div>
 
-<h2>Six checks</h2>
+<h2>Seven checks</h2>
 <table>
 <tr><th>Check</th><th>What it stops</th></tr>
 <tr><td><strong>Seal</strong></td><td>Policy edited to widen what is admitted — fails <em>closed</em>, to admitting nothing</td></tr>
@@ -108,6 +109,7 @@ li{margin-bottom:6px}
 <tr><td><strong>Capability</strong></td><td>Code that reaches further than it declares</td></tr>
 <tr><td><strong>Egress</strong></td><td>Outbound connections to unapproved hosts</td></tr>
 <tr><td><strong>Credential</strong></td><td>An agent using a secret the estate never granted it</td></tr>
+<tr><td><strong>Imports</strong></td><td>An agent whose imports would make the host fetch a package from an index at load time</td></tr>
 </table>
 
 <h3>The capability check is the one that is different</h3>

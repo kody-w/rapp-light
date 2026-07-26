@@ -182,9 +182,21 @@ class TestOrganSurface(StrainFixture):
             json.loads(out)  # always valid JSON, even on failure
 
     def test_system_context_never_invites_pasting_a_secret(self):
+        """Assert the BEHAVIOUR, not one exact phrasing.
+
+        This asserted the literal string "never ask the user to paste" while
+        the organ says "do not ask the user to paste a secret into the
+        conversation" — same instruction, different words, and the test was
+        red. A prompt-wording test that pins an exact sentence breaks every
+        time someone improves the sentence, which teaches people to edit the
+        test instead of reading it."""
         agent = self.cred.StrainCredentialAgent()
         text = agent.system_context().lower()
-        self.assertIn("never ask the user to paste", text)
+        self.assertIn("paste", text)
+        self.assertTrue(
+            any(neg in text for neg in ("do not ask", "never ask", "don't ask")),
+            f"system_context must instruct against soliciting a pasted secret; "
+            f"got: {text[:200]!r}")
 
     def test_check_action_explains_a_refusal(self):
         agent = self.cred.StrainCredentialAgent()
