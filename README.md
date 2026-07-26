@@ -290,8 +290,10 @@ RAPP is a project of Wildhaven Homes LLC. See
 
 ---
 
-## License and marks
+## License
 
-Code: **MIT** — see [LICENSE](LICENSE). Fork it freely.
+MIT — see [LICENSE](LICENSE).
 
-Names: **RAPP Light**™ is a compound `rapp-*` mark of **Wildhaven Homes LLC**, claimed at common law. The MIT license grants no rights to the marks. "RAPP" standing alone and the RAPP Brainstem are deliberately **not** claimed — the strain governs the Brainstem precisely because the Brainstem stays unencumbered. See [TRADEMARK.md](TRADEMARK.md).
+---
+
+<sub>RAPP Light is a trademark of Wildhaven Homes LLC. Code is MIT licensed; the license does not grant rights to the name. [Trademark notice](TRADEMARK.md)</sub>
