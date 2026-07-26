@@ -143,6 +143,43 @@ specific bytes; it cannot make the review good. Its contribution is to make the
 subject of review unambiguous (a hash, with a declared capability list verified
 against the code) instead of a moving target.
 
+### T11 — An approved agent makes the host fetch a package from an index
+**Mitigated, and this is the estate's most concrete live exposure.**
+
+The brainstem auto-installs missing dependencies: a module-level import it
+cannot satisfy causes it to shell `pip install <name>` at load time and then
+execute what comes back, in-process, as the user who owns the machine.
+
+Measured on 2026-07-25 across the public registry:
+
+| module | PyPI status | agents importing it |
+|---|---|---|
+| `basic_agent` | **404 — unclaimed; anyone could register it** | 105 |
+| `agents` | 200 — **already owned by a third party** | 50 |
+| `utils` | 200 — already owned by a third party | 17 |
+
+So this is not a hypothetical typosquat. The names an honest agent imports are
+already registrable or already registered by strangers.
+
+The strain refuses any agent whose **module-level** imports are neither
+standard library, nor bundled with the host, nor listed in the organisation's
+`allowed_imports`. The check runs before the allowlist decision, so an
+administrator learns a file is dangerous even under default-deny where
+everything is unapproved anyway.
+
+Imports **inside functions** are deliberately not flagged: they raise inside
+the agent's own code and never reach the installer, so flagging them would be
+noise — and a control that cries wolf gets switched off.
+
+Deployments should additionally set `no-index` in the host venv's `pip.conf`
+and `PIP_NO_INDEX=1` in the launcher, which makes the failure closed at the
+installer itself rather than only at the policy layer.
+
+**Residual risk:** an approved agent may still import a module the host *does*
+have, and a compromised version of a legitimately-installed dependency is
+outside this control. This narrows the fetch-at-load-time path; it is not a
+substitute for controlling the host image.
+
 ---
 
 ## 4. Explicitly out of scope
@@ -172,6 +209,24 @@ posture honestly — it simply carries less assurance, and says so.
 
 ---
 
+## 5a. Two behaviours a reviewer will notice
+
+**Withheld files produce loader errors on the sweep that withholds them.**
+`load_agents()` snapshots the file list and then loads each path; the policy
+organ sorts first and moves withheld files during its own `__init__`, so the
+loader reaches paths that no longer exist and prints
+`Failed to load ...: [Errno 2] No such file or directory`. This is expected and
+happens **once per withholding event** — on subsequent sweeps the file is
+already outside the glob. The authoritative record of *why* something was
+withheld is `strain-audit.jsonl` and `action=withheld`, not the loader log.
+
+**The shared base class is never adjudicated.** `basic_agent.py` matches
+`*_agent.py` but is not a capability and declares no `__manifest__`.
+Withholding it would remove the class every agent imports. It is exempt, and
+`test_the_shared_base_class_is_never_withheld` asserts it — this was a real
+defect, found the first time the strain was run inside a live brainstem, that
+every isolated test had missed.
+
 ## 6. Verification
 
 The claims above are covered by the test suite (`tests/test_strain.py`), which
@@ -182,3 +237,14 @@ python3 -m unittest discover -s tests -v
 ```
 
 Each test is named for the threat it covers.
+
+The suite also reproduces `load_agents()`'s snapshot-then-load algorithm
+exactly, with no brainstem and no dependencies, so the interaction that only
+appears at runtime is covered anywhere the tests run.
+
+**Live verification** (2026-07-25, brainstem on an isolated port, sandboxed
+`HOME`): with one of four agents approved, the live loader reported exactly
+`['StrainPolicy', 'JsonDoctor', 'StrainAdmin']`; the unapproved agents and an
+agent importing an unregistrable package were in `withheld/`; `basic_agent.py`
+remained on the load path; and the brainstem logged **zero** auto-install
+attempts.

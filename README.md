@@ -33,7 +33,8 @@ kernel.**
                        │ loads agents/*_agent.py on every turn
    ┌───────────────────▼──────────────────────────┐
    │  aa_strain_policy_agent.py   ← the organ     │
-   │  seal → ring → identity → capability → egress│
+   │  seal → ring → identity → capability →       │
+   │  imports → egress                            │
    └───────────────────┬──────────────────────────┘
                        │ reads
    ┌───────────────────▼──────────────────────────┐
@@ -46,7 +47,7 @@ reaches everyone else, because it is the same grail.
 
 ---
 
-## The six checks
+## The seven checks
 
 | # | Check | What it stops |
 |---|---|---|
@@ -56,6 +57,16 @@ reaches everyone else, because it is the same grail.
 | 4 | **Capability** | code that reaches further than it declares |
 | 5 | **Egress** | outbound connections to unapproved hosts |
 | 6 | **Credential** | an agent using a secret the estate never granted it |
+| 7 | **Imports** | an agent whose imports would make the host fetch a package from an index at load time |
+
+### Check 7 exists because the hole is live, not hypothetical
+
+The brainstem auto-installs missing dependencies. On 2026-07-25, `basic_agent`
+— imported by **105** registry agents — was **unclaimed on PyPI**, and `agents`
+(50 importers) was already owned by a stranger. An approved agent's import can
+therefore fetch and execute someone else's package as the user who owns the
+machine. The strain refuses agents whose module-level imports the host cannot
+already satisfy. See `docs/THREAT-MODEL.md` T11.
 
 ### Check 4 is the one that is different
 
@@ -203,7 +214,7 @@ Everything a review needs is in this repo, written to be argued with rather than
 to reassure:
 
 - **[`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md)** — assets, trust boundaries,
-  ten threats with dispositions, and **an explicit list of what this does not
+  twelve threats with dispositions, and **an explicit list of what this does not
   stop**. T6 states plainly that a local administrator can disable the control,
   because every endpoint DLP product has that same boundary and pretending
   otherwise is how a control gets trusted where it should not be.
@@ -224,8 +235,8 @@ to reassure:
 Every mitigation claimed in the threat model has a test named for it:
 
 ```bash
-python3 conformance.py                       # 14 checks, proved against the code
-python3 -m unittest discover -s tests -v     # 49 tests, no network, no deps
+python3 conformance.py                       # checks, proved against the code
+python3 -m unittest discover -s tests -v     # no network, no deps
 ```
 
 ---

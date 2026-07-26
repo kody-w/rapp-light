@@ -476,6 +476,143 @@ class TestAudit(StrainTestCase):
                          "mattered must not be buried")
 
 
+class TestLoaderContract(StrainTestCase):
+    """The hazard that only appears inside a real brainstem.
+
+    load_agents() snapshots `sorted(glob(AGENTS_PATH/*_agent.py))` and THEN
+    loads each path. The policy organ sorts first (the `aa_` prefix) and moves
+    withheld files during its own __init__ — so by the time the loader reaches
+    them they are gone.
+
+    Every isolated test passed while this was untested, and the first live run
+    exposed two defects at once. These reproduce the loader's algorithm exactly,
+    with no brainstem and no dependencies, so they run anywhere."""
+
+    def simulate_load_agents(self):
+        """Snapshot-then-load, exactly as the kernel does. Returns
+        (loaded_names, vanished_paths)."""
+        import glob as _glob
+        files = sorted(_glob.glob(os.path.join(self.agents, "*_agent.py")))
+        # the organ runs during the sweep, as its __init__ does in the kernel
+        mod = load_module(os.path.join(self.agents, "aa_strain_policy_agent.py"),
+                          "organ_sweep")
+        mod.StrainPolicyAgent()
+        loaded, vanished = [], []
+        for f in files:
+            if not os.path.exists(f):
+                vanished.append(os.path.basename(f))
+                continue
+            loaded.append(os.path.basename(f))
+        return loaded, vanished
+
+    def test_the_shared_base_class_is_never_withheld(self):
+        """basic_agent.py matches *_agent.py, declares no __manifest__, and is
+        NOT an agent. Withholding it removes the class every agent imports.
+
+        The first live run withheld it. No isolated test had one on disk."""
+        self.init()
+        with open(os.path.join(self.agents, "basic_agent.py"), "w") as fh:
+            fh.write("class BasicAgent:\n    pass\n")
+        self.write_agent("benign_agent.py", BENIGN)
+        self.posture()
+        self.assertTrue(
+            os.path.isfile(os.path.join(self.agents, "basic_agent.py")),
+            "the shared base class must stay on the load path")
+        self.assertFalse(
+            os.path.isfile(os.path.join(self.held, "basic_agent.py")),
+            "the shared base class must never be withheld")
+
+    def test_a_withheld_file_vanishing_mid_sweep_does_not_break_the_loader(self):
+        self.init()
+        for i in range(3):
+            self.write_agent(f"unapproved{i}_agent.py", BENIGN)
+        loaded, vanished = self.simulate_load_agents()
+        self.assertEqual(len(vanished), 3,
+                         "withheld files should be gone by the time the "
+                         "snapshotted loader reaches them")
+        self.assertIn("aa_strain_policy_agent.py", loaded)
+
+    def test_an_approved_agent_survives_the_same_sweep(self):
+        """The dropper must differ in CONTENT, not merely in filename.
+
+        The first version of this test wrote the same BENIGN source to both
+        files and failed — because approval is of BYTES. Two files with
+        identical content are the same approved capability regardless of what
+        they are called, which is the content-addressing working exactly as
+        intended. Worth keeping as a comment: it is the property most people
+        assume an allowlist has and most allowlists do not."""
+        self.init()
+        p = self.write_agent("keeper_agent.py", BENIGN)
+        self.ctl("approve", p, "--by", "tester")
+        self.write_agent("dropper_agent.py",
+                         BENIGN.replace("reads a file", "a different capability"))
+        loaded, vanished = self.simulate_load_agents()
+        self.assertIn("keeper_agent.py", loaded)
+        self.assertIn("dropper_agent.py", vanished)
+
+    def test_approval_is_of_bytes_not_filenames(self):
+        """Asserted directly, because it surprised me while writing the test
+        above and it will surprise a reviewer too."""
+        self.init()
+        p = self.write_agent("original_agent.py", BENIGN)
+        self.ctl("approve", p, "--by", "tester")
+        self.write_agent("renamed_copy_agent.py", BENIGN)   # identical bytes
+        enabled = self.enabled()
+        self.assertIn("original_agent.py", enabled)
+        self.assertIn("renamed_copy_agent.py", enabled,
+                      "identical bytes are the same approved capability")
+
+
+class TestAutoInstallOracle(StrainTestCase):
+    """The brainstem shells `pip install <name>` for any module-level import it
+    cannot satisfy. An approved agent can therefore still cause a fetch-and-
+    execute from a package index — and `basic_agent` was UNCLAIMED on PyPI on
+    2026-07-25 while 105 registry agents imported it."""
+
+    GREEDY = BENIGN.replace("import json, os",
+                            "import json, os\nimport totally_not_a_real_package")
+
+    def test_T11_an_agent_that_would_trigger_pip_is_withheld(self):
+        self.init()
+        self.write_agent("greedy_agent.py", self.GREEDY)
+        self.assertNotIn("greedy_agent.py", self.enabled())
+        reasons = " ".join(w.get("reason", "")
+                           for w in self.posture()["withheld"])
+        self.assertIn("package index", reasons)
+
+    def test_T11_approving_it_is_refused_so_the_tool_matches_the_runtime(self):
+        self.init()
+        p = self.write_agent("greedy_agent.py", self.GREEDY)
+        r = self.ctl("approve", p, expect=2)
+        self.assertIn("totally_not_a_real_package", r.stdout)
+
+    def test_T11_stdlib_and_bundled_imports_are_not_flagged(self):
+        self.init()
+        p = self.write_agent("benign_agent.py", BENIGN)
+        self.assertEqual(self.organ_mod.unresolvable_imports(p), set(),
+                         "ordinary stdlib imports must not be findings")
+
+    def test_T11_a_deferred_import_is_not_flagged(self):
+        """An import inside a function raises inside the agent's own code and
+        never reaches the installer. Flagging it would be noise."""
+        self.init()
+        src = BENIGN + "\n    def later(self):\n        import totally_not_real\n"
+        p = self.write_agent("deferred_agent.py", src)
+        self.assertEqual(self.organ_mod.unresolvable_imports(p), set())
+
+    def test_T11_an_organisation_can_allow_its_own_vendored_modules(self):
+        self.init()
+        p = self.write_agent("greedy_agent.py", self.GREEDY)
+        with open(self.manifest) as fh:
+            man = json.load(fh)
+        man["allowed_imports"] = ["totally_not_a_real_package"]
+        man["seal"] = self.organ_mod.seal_of(man)
+        with open(self.manifest, "w") as fh:
+            json.dump(man, fh, indent=2, sort_keys=True)
+        self.ctl("approve", p, "--by", "tester")
+        self.assertIn("greedy_agent.py", self.enabled())
+
+
 class TestNoKernelChange(StrainTestCase):
 
     def test_the_strain_ships_no_brainstem(self):

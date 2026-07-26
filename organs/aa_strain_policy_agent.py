@@ -19,6 +19,10 @@ WHAT IT ENFORCES, IN ORDER
                    execution, undeclared credential reads are refused even if
                    the agent is otherwise approved.
     5. Egress      allowed hosts are narrowed to the enterprise's list.
+    6. Credential  an agent may not use a secret the estate never granted it.
+    7. Imports     an agent whose module-level imports the host cannot
+                   satisfy is refused, because loading it would make the
+                   brainstem fetch a package from an index and execute it.
 
 WHY CAPABILITY DECLARATIONS ARE VERIFIED AND NOT TRUSTED
 
@@ -151,6 +155,58 @@ CAPABILITY_EVIDENCE = {
         "builtins": {"eval", "exec", "compile", "__import__"},
     },
 }
+
+# Files that match *_agent.py but are NOT agents. basic_agent.py is the shared
+# base class every agent imports; it declares no __manifest__ because it is not
+# a capability. Adjudicating it withholds the kernel's own DNA and breaks every
+# agent that imports it without a fallback.
+#
+# Found by running the strain inside a live brainstem for the first time. Every
+# isolated test passed because none of them had a basic_agent.py in the folder.
+NOT_AGENTS = {"basic_agent.py", "__init__.py"}
+
+# Modules an agent may import without the brainstem trying to fetch them.
+# Everything in the standard library, plus what the brainstem itself already
+# depends on, plus the base class.
+BUNDLED = {"agents", "basic_agent", "local_storage", "utils",
+           "flask", "flask_cors", "requests", "dotenv", "werkzeug"}
+
+
+def unresolvable_imports(path):
+    """Module-level imports that are neither stdlib nor bundled.
+
+    This is the strain's answer to the brainstem's auto-install behaviour: an
+    import the host cannot already satisfy makes the kernel shell
+    `pip install <name>` at load time. That turns any typo, or any reference to
+    an internal-only module, into "fetch and execute a stranger's package as
+    the user who holds this machine's tokens".
+
+    Only MODULE-LEVEL imports count. An import inside a function raises inside
+    the agent's own code and never reaches the installer, so flagging it would
+    be noise — and a control that cries wolf gets switched off.
+
+    Static parsing only: deciding whether to trust a file by importing it is
+    the wrong order, and importing it is precisely what triggers the install."""
+    try:
+        with open(path, "rb") as fh:
+            tree = ast.parse(fh.read())
+    except (OSError, SyntaxError):
+        return set()
+    stdlib = getattr(sys, "stdlib_module_names", set())
+    out = set()
+    for node in tree.body:          # module level only, deliberately
+        names = []
+        if isinstance(node, ast.Import):
+            names = [a.name.split(".")[0] for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:          # relative import — local, never fetched
+                continue
+            if node.module:
+                names = [node.module.split(".")[0]]
+        for n in names:
+            if n and n not in stdlib and n not in BUNDLED:
+                out.add(n)
+    return out
 
 DEFAULT_BAND = "ga"
 QUARANTINE_DIRNAME = "withheld"
@@ -388,6 +444,21 @@ def adjudicate(path, policy):
         return False, dict(rec, verdict="withheld",
                            reason=f"unknown ring {ring!r}; expected one of {RINGS}")
 
+    # Checked BEFORE the allowlist, because an import the host cannot satisfy is
+    # a property of the FILE, not of the policy. Under default-deny everything
+    # is unapproved, so if this ran later an administrator would only ever be
+    # told "not approved" and would never learn the file would have made the
+    # brainstem fetch and execute a package from an index.
+    extra = set(policy.get("allowed_imports") or [])
+    unresolved = unresolvable_imports(path) - extra
+    if unresolved and policy.get("block_auto_install", True):
+        return False, dict(rec, verdict="withheld",
+                           reason="imports module(s) this host cannot satisfy, "
+                                  "which would make the brainstem fetch them "
+                                  "from a package index at load time: "
+                                  + ", ".join(sorted(unresolved)),
+                           unresolvable_imports=sorted(unresolved))
+
     entry = (policy.get("allowlist") or {}).get(sha)
     band = policy.get("band") or DEFAULT_BAND
     band_rank = RING_RANK.get(band, 0)
@@ -542,6 +613,16 @@ class StrainPolicyAgent(BasicAgent):
                 if not fn.endswith("_agent.py"):
                     continue
                 held = os.path.join(hold, fn)
+                if fn in NOT_AGENTS:
+                    # withheld by an older build before NOT_AGENTS existed —
+                    # bring it home unconditionally
+                    if not os.path.exists(os.path.join(agents, fn)):
+                        try:
+                            shutil.move(held, os.path.join(agents, fn))
+                            readmitted.append(fn)
+                        except OSError:
+                            pass
+                    continue
                 if fn in set(policy.get("always_permit") or []):
                     ok = True
                 else:
@@ -559,6 +640,8 @@ class StrainPolicyAgent(BasicAgent):
         for fn in sorted(os.listdir(agents)):
             if not fn.endswith("_agent.py") or fn.startswith("."):
                 continue
+            if fn in NOT_AGENTS:
+                continue        # a base class is not a capability
             path = os.path.join(agents, fn)
             if os.path.abspath(path) == os.path.abspath(__file__):
                 continue        # the policy organ does not adjudicate itself
@@ -585,7 +668,8 @@ class StrainPolicyAgent(BasicAgent):
         if os.path.isdir(hold):
             seen = {w.get("file") for w in withheld}
             for fn in sorted(os.listdir(hold)):
-                if not fn.endswith("_agent.py") or fn in seen:
+                if (not fn.endswith("_agent.py") or fn in seen
+                        or fn in NOT_AGENTS):
                     continue
                 _, rec = adjudicate(os.path.join(hold, fn), policy)
                 withheld.append(dict(rec, already_withheld=True))

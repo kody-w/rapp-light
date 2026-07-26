@@ -110,6 +110,21 @@ cp "$RAPP_HOME/organs/strain_admin_agent.py"     "$RAPP_HOME/agents/"
 
 chmod 0700 "$RAPP_HOME" 2>/dev/null || true
 
+# Close the auto-install oracle at the installer itself, not only at the policy
+# layer. The brainstem shells `pip install <name>` for any module-level import
+# it cannot satisfy; `basic_agent` was UNCLAIMED on PyPI on 2026-07-25 while 105
+# registry agents imported it. See docs/THREAT-MODEL.md T11.
+if [ -d "${BRAINSTEM_VENV:-$HOME/.brainstem/venv}" ]; then
+    cat > "${BRAINSTEM_VENV:-$HOME/.brainstem/venv}/pip.conf" <<'PIPCONF'
+[global]
+no-index = true
+disable-pip-version-check = true
+require-virtualenv = true
+PIPCONF
+    say "closed the pip auto-install path in the brainstem venv"
+    say "  (legitimate setup installs must pass --index-url explicitly)"
+fi
+
 # A launcher in ~/.local/bin — the one conventional per-user location, and the
 # only thing written outside $RAPP_HOME. Still inside $HOME.
 BIN="$HOME/.local/bin"

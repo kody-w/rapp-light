@@ -153,12 +153,15 @@ def cmd_scan(args):
             continue
         allowed, rec = ORGAN.adjudicate(p, man)
         obs, _ = ORGAN.observed_capabilities(p)
+        unres = ORGAN.unresolvable_imports(p) - set(man.get("allowed_imports") or [])
         mark = "PERMIT " if allowed else "WITHHELD"
         ok_n += bool(allowed)
         print(f"  {mark} {fn}")
         print(f"           ring={rec.get('ring','?'):16} sha={rec.get('sha256','?')}")
         if obs:
             print(f"           reaches: {', '.join(sorted(obs))}")
+        if unres:
+            print(f"           would fetch: {', '.join(sorted(unres))}")
         if not allowed:
             print(f"           why: {rec.get('reason')}")
         print()
@@ -191,6 +194,23 @@ def cmd_approve(args):
               "estate under an approval that does not mention it.")
         print("  Fix the agent's __manifest__, or re-run with --force to record "
               "the approval anyway (the runtime will still withhold it).")
+        return 2
+
+    # The runtime withholds an agent whose imports the host cannot satisfy.
+    # If approve stayed silent about that, an administrator would be told
+    # "approved" and then find it withheld — the tool and the deployment must
+    # never disagree.
+    unresolved = ORGAN.unresolvable_imports(target) - set(
+        man.get("allowed_imports") or [])
+    if unresolved and not args.force:
+        print(f"  REFUSED: {os.path.basename(target)} imports module(s) this "
+              f"host cannot satisfy:")
+        for u in sorted(unresolved):
+            print(f"    {u}")
+        print("\n  At load time the brainstem would try to fetch these from a "
+              "package index and execute them.")
+        print("  Vendor them, add them to \"allowed_imports\" in the manifest, "
+              "or re-run with --force (the runtime will still withhold it).")
         return 2
 
     ring = args.ring or decl.get("ring") or "frontier"
