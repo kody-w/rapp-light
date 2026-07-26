@@ -627,8 +627,16 @@ def _to_cef(rec):
     custom parser."""
     sev = {"agent.withheld": 6, "credential.refused": 7,
            "credential.used": 4, "agent.readmitted": 3}.get(rec.get("event"), 5)
+    def _esc(v):
+        # CEF escapes '=' in extension values. Hoisted out of the f-string
+        # because an f-string expression may not contain a backslash before
+        # Python 3.12 -- this raised SyntaxError on the 3.9 CI matrix, which
+        # made every strainctl invocation fail, which failed the audit tests
+        # with a misleading "1 != 0".
+        return str(v).replace("=", "\\=")
+
     ext = " ".join(
-        f"{k}={str(v).replace('=', '\\=')}"
+        "{}={}".format(k, _esc(v))
         for k, v in sorted(rec.items())
         if k not in ("event", "hash", "prev") and v not in (None, "", [])
     )
