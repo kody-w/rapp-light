@@ -592,6 +592,31 @@ class TestAutoInstallOracle(StrainTestCase):
         self.assertEqual(self.organ_mod.unresolvable_imports(p), set(),
                          "ordinary stdlib imports must not be findings")
 
+    def test_T11_works_without_sys_stdlib_module_names(self):
+        """sys.stdlib_module_names is 3.10+. The first version of this check
+        fell back to an empty set on 3.9, which made every stdlib import look
+        unfetchable and withheld the whole estate. The CI matrix caught it; a
+        3.9 deployment would have bricked."""
+        import sys as _s
+        saved = getattr(_s, "stdlib_module_names", None)
+        if saved is not None:
+            del _s.stdlib_module_names
+        try:
+            mod = load_module(os.path.join(self.agents,
+                                           "aa_strain_policy_agent.py"),
+                              "organ_py39")
+            self.init()
+            p = self.write_agent("benign_agent.py", BENIGN)
+            self.assertEqual(mod.unresolvable_imports(p), set(),
+                             "stdlib imports must resolve without "
+                             "sys.stdlib_module_names")
+            g = self.write_agent("greedy2_agent.py", self.GREEDY)
+            self.assertEqual(mod.unresolvable_imports(g),
+                             {"totally_not_a_real_package"})
+        finally:
+            if saved is not None:
+                _s.stdlib_module_names = saved
+
     def test_T11_a_deferred_import_is_not_flagged(self):
         """An import inside a function raises inside the agent's own code and
         never reaches the installer. Flagging it would be noise."""

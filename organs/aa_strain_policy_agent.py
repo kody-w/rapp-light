@@ -192,8 +192,28 @@ def unresolvable_imports(path):
             tree = ast.parse(fh.read())
     except (OSError, SyntaxError):
         return set()
-    stdlib = getattr(sys, "stdlib_module_names", set())
+    # sys.stdlib_module_names is 3.10+. Falling back to an empty set (the
+    # obvious thing) makes EVERY stdlib import look unfetchable and withholds
+    # the entire estate -- a "safe" default that is catastrophically wrong. The
+    # CI matrix on 3.9 caught it; a deployment on 3.9 would have bricked.
+    #
+    # find_spec answers the real question directly and on every version: can
+    # this host already resolve the name without fetching anything? It is a
+    # path search, not an import, so nothing is executed.
+    stdlib = getattr(sys, "stdlib_module_names", None)
     out = set()
+
+    def satisfiable(name):
+        if stdlib is not None and name in stdlib:
+            return True
+        if name in sys.builtin_module_names:
+            return True
+        try:
+            import importlib.util
+            return importlib.util.find_spec(name) is not None
+        except (ImportError, ValueError, ModuleNotFoundError, AttributeError):
+            return False
+
     for node in tree.body:          # module level only, deliberately
         names = []
         if isinstance(node, ast.Import):
@@ -204,7 +224,7 @@ def unresolvable_imports(path):
             if node.module:
                 names = [node.module.split(".")[0]]
         for n in names:
-            if n and n not in stdlib and n not in BUNDLED:
+            if n and n not in BUNDLED and not satisfiable(n):
                 out.add(n)
     return out
 
