@@ -1,5 +1,9 @@
 # RAPP Light — a **strain** of the RAPP brainstem
 
+<!-- rapp1:network-header:start -->
+[![RAPP/1](https://kody-w.github.io/rapp-hive-public/portfolio/badges/rapp-light.svg)](https://github.com/kody-w/rapp-hive-public/blob/main/portfolio/repos/rapp-light.md) · **New to RAPP?** [Start here: get your Brainstem →](https://github.com/kody-w/rapp-installer#start-here)
+<!-- rapp1:network-header:end -->
+
 > A locked-down, auditable RAPP deployment for enterprise networks — built for
 > users who have no elevated permissions, and administered the way data loss
 > prevention already is.
